@@ -30,6 +30,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import warnings
+import numpy as np
 from hashlib import sha1
 from pickle import dumps
 
@@ -43,13 +44,15 @@ class PowerModel:
     This Power model compute the power estimations and handle the learning of a new model when needed.
     """
 
-    def __init__(self, frequency: int, min_samples: int):
+    def __init__(self, frequency: int, idle_consumption: float, min_samples: int):
         """
         Initialize a new power model.
         :param frequency: Frequency of the power model (in MHz)
+        :param idle_consumption: Idle consumption of the power model (in Watts)
         :param min_samples: Minimum amount of samples required before trying to learn a power model
         """
         self.frequency = frequency
+        self.idle_consumption = idle_consumption
         self.min_samples = min_samples
         self.clf = ElasticNet()
         self.hash = 'uninitialized'
@@ -65,11 +68,11 @@ class PowerModel:
         if len(samples_history) < self.min_samples:
             return
 
-        fit_intercept = len(samples_history) == samples_history.max_length
+        fit_intercept = self.idle_consumption == 0.0
         model = ElasticNet(fit_intercept=fit_intercept, positive=True)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model.fit(samples_history.events_values, samples_history.power_values)
+            model.fit(samples_history.events_values, np.maximum(np.array(samples_history.power_values) - self.idle_consumption, 0.0))
 
         # Discard the new model when the intercept is not in specified range
         if not min_intercept <= model.intercept_ < max_intercept:

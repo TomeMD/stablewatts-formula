@@ -58,7 +58,7 @@ class HwPCReportHandler(Handler):
         :return: Initialized Ordered dict containing a power model for each frequency layer
         """
         return OrderedDict(
-            (freq, FrequencyLayer(freq, self.state.config.min_samples_required, self.state.config.history_window_size, self.state.config.error_window_size))
+            (freq, FrequencyLayer(freq, self.state.config.cpu_topology.idle_consumption, self.state.config.min_samples_required, self.state.config.history_window_size, self.state.config.error_window_size))
             for freq in self.state.config.cpu_topology.get_supported_frequencies()
         )
 
@@ -123,6 +123,9 @@ class HwPCReportHandler(Handler):
         rapl_power = rapl[self.state.config.rapl_event]
         power_reports.append(self._gen_power_report(timestamp, 'rapl', self.state.config.rapl_event, rapl_power, 1.0, global_report.metadata))
 
+        # Data sent just for experimental reasons (it is useless as it never changes)
+        power_reports.append(self._gen_power_report(timestamp, f'{self.hostname}-idle', "PREVIOUSLY-MEASURED", self.state.config.cpu_topology.idle_consumption, 1.0, global_report.metadata))
+
         try:
             pkg_frequency = self._compute_avg_pkg_frequency(avg_msr)
         except ZeroDivisionError:
@@ -148,7 +151,7 @@ class HwPCReportHandler(Handler):
             power_reports.append(self._gen_power_report(timestamp, target_name, layer.model.hash, target_power, target_ratio, target_report.metadata))
 
         # compute power model error from reference
-        model_error = fabs(rapl_power - raw_global_power)
+        model_error = fabs(max(rapl_power - self.state.config.cpu_topology.idle_consumption, 0.0) - raw_global_power)
 
         layer.store_sample_in_history(rapl_power, self._extract_events_value(global_core))
         layer.store_error_in_history(model_error)

@@ -50,6 +50,9 @@ class SmartWattsConfigValidator(ConfigValidator):
         if config['cpu-tdp'] < 0 or config['cpu-base-clock'] < 0 or config['cpu-base-freq'] < 0:
             raise InvalidConfigurationParameterException('CPU topology parameters (tdp/frequencies) must be positive')
 
+        if config['cpu-idle-consumption'] < 0 or config['cpu-idle-consumption'] > config['cpu-tdp']:
+            raise InvalidConfigurationParameterException('CPU idle consumption must be a value between 0 and tdp')
+
         if config['cpu-error-threshold'] < 0 or config['dram-error-threshold'] < 0:
             raise InvalidConfigurationParameterException('CPU/DRAM error threshold must be positive')
 
