@@ -49,6 +49,7 @@ class HwPCReportHandler(Handler):
 
     def __init__(self, state):
         Handler.__init__(self, state)
+        self.hostname = self.state.sensor[7:]
         self.layers = self._generate_frequency_layers()
         self.ticks: OrderedDict[datetime.datetime, dict[str, HWPCReport]] = OrderedDict()
 
@@ -121,7 +122,7 @@ class HwPCReportHandler(Handler):
         avg_msr = self._gen_msr_events_group(global_report)
         global_core = self._gen_agg_core_report_from_running_targets(hwpc_reports)
         rapl_power = rapl[self.state.config.rapl_event]
-        power_reports.append(self._gen_power_report(timestamp, 'rapl', self.state.config.rapl_event, rapl_power, 1.0, global_report.metadata))
+        power_reports.append(self._gen_power_report(timestamp, f'{self.hostname}-rapl', self.state.config.rapl_event, rapl_power, 1.0, global_report.metadata))
 
         # Data sent just for experimental reasons (it is useless as it never changes)
         power_reports.append(self._gen_power_report(timestamp, f'{self.hostname}-idle', "PREVIOUSLY-MEASURED", self.state.config.cpu_topology.idle_consumption, 1.0, global_report.metadata))
@@ -174,7 +175,6 @@ class HwPCReportHandler(Handler):
         """
         metadata = {
             'scope': self.state.config.scope.value,
-            'socket': self.state.socket,
             'layer_frequency': layer.model.frequency,
             'pkg_frequency': pkg_frequency,
             'samples': len(layer.samples_history),
@@ -196,7 +196,6 @@ class HwPCReportHandler(Handler):
         """
         report_metadata = metadata | {
             'scope': self.state.config.scope.value,
-            'socket': self.state.socket,
             'formula': formula,
             'ratio': ratio,
         }
@@ -204,47 +203,51 @@ class HwPCReportHandler(Handler):
 
     def _gen_rapl_events_group(self, system_report) -> dict[str, float]:
         """
-        Generate an events group with the RAPL reference event converted in Watts for the current socket.
+        Generate an events group with the RAPL reference event converted in Watts for all available sockets.
         :param system_report: The HWPC report of the System target
-        :return: A dictionary containing the RAPL reference event with its value converted in Watts
+        :return: A dictionary containing the RAPL reference event with its value converted in Watts for all sockets
         """
-        cpu_events = next(iter(system_report.groups['rapl'][str(self.state.socket)].values()))
-        energy = ldexp(cpu_events[self.state.config.rapl_event], -32) / (self.state.config.reports_frequency / 1000)
+        energy = 0
+        for _, socket_events in system_report.groups['rapl'].items():
+            core_events = next(iter(socket_events.values()))
+            energy += ldexp(core_events[self.state.config.rapl_event], -32) / (self.state.config.reports_frequency / 1000)
         return {self.state.config.rapl_event: energy}
 
     def _gen_msr_events_group(self, system_report) -> dict[str, float]:
         """
-        Generate an events group with the average of the MSR counters for the current socket.
+        Generate an events group with the average of the MSR counters for all available sockets.
         :param system_report: The HWPC report of the System target
         :return: A dictionary containing the average of the MSR counters
         """
         msr_events_group = defaultdict(int)
         msr_events_count = defaultdict(int)
-        for _, cpu_events in system_report.groups['msr'][str(self.state.socket)].items():
-            for event_name, event_value in {k: v for k, v in cpu_events.items() if not k.startswith('time_')}.items():
-                msr_events_group[event_name] += event_value
-                msr_events_count[event_name] += 1
+        for _, socket_events in system_report.groups['msr'].items():
+            for _, core_events in socket_events.items():
+                for event_name, event_value in {k: v for k, v in core_events.items() if not k.startswith('time_')}.items():
+                    msr_events_group[event_name] += event_value
+                    msr_events_count[event_name] += 1
         return {k: (v / msr_events_count[k]) for k, v in msr_events_group.items()}
 
     def _gen_core_events_group(self, report) -> dict[str, float]:
         """
-        Generate an events group with Core events for the current socket.
+        Generate an events group with Core events for all available sockets.
         The events value are the sum of the value for each CPU.
         :param report: The HWPC report of any target
-        :return: A dictionary containing the Core events of the current socket
+        :return: A dictionary containing the aggregated Core events of all sockets
         """
         core_events_group = defaultdict(int)
-        for _, cpu_events in report.groups['core'][str(self.state.socket)].items():
-            for event_name, event_value in {k: v for k, v in cpu_events.items() if not k.startswith('time_')}.items():
-                core_events_group[event_name] += event_value
+        for _, socket_events in report.groups['core'].items():
+            for _, core_events in socket_events.items():
+                for event_name, event_value in {k: v for k, v in core_events.items() if not k.startswith('time_')}.items():
+                    core_events_group[event_name] += event_value
 
         return core_events_group
 
     def _gen_agg_core_report_from_running_targets(self, targets_report) -> dict[str, float]:
         """
-        Generate an aggregate Core events group of the running targets for the current socket.
+        Generate an aggregate Core events group of the running targets for all available sockets
         :param targets_report: List of Core events group of the running targets
-        :return: A dictionary containing an aggregate of the Core events for the running targets of the current socket
+        :return: A dictionary containing an aggregate of the Core events for the running targets of all sockets
         """
         agg_core_events_group = defaultdict(int)
         for _, target_report in targets_report.items():
